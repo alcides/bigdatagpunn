@@ -40,7 +40,6 @@ def train(X, y, conf, iterations=6000):
         # how much did each l1 value contribute to the l2 error (according to the weights)?
         l1_error = l2_delta.dot(syn1.T)
         l1_delta = l1_error * nonlin(l1,deriv=True)
-        
         syn1 += l1.T.dot(l2_delta)
         syn0 += l0.T.dot(l1_delta)
     return (syn0, syn1)
@@ -54,12 +53,12 @@ def nonlind_g(x):
 	return x*(1-x)
     
     
-@cuda.jit(argtypes=[numba.float64[:,:], numba.float64[:,:], numba.float64[:,:], numba.float64[:,:], numba.int64])
+@cuda.jit()
 def train_kernel(X, y, syn0, syn1, iterations):
     instances = train_instances
-    l1 = cuda.shared.array(shape=(instances, ndims), dtype=numba.float64)
-    l2_delta = cuda.shared.array(shape=(instances, 3), dtype=numba.float64)
-    l1_delta = cuda.shared.array(shape=(instances, ndims), dtype=numba.float64)
+    l1 = cuda.shared.array(shape=(instances, ndims), dtype=numba.float32)
+    l2_delta = cuda.shared.array(shape=(instances, 3), dtype=numba.float32)
+    l1_delta = cuda.shared.array(shape=(instances, ndims), dtype=numba.float32)
     i, j = cuda.grid(2)
     if i < instances and j < ndims:
         for it in range(iterations):
@@ -91,7 +90,7 @@ def train_kernel(X, y, syn0, syn1, iterations):
             for k in range(instances):
                 acc += X[k, i] * l1_delta[k, j]
             syn0[i, j] += acc
-            cuda.syncthreads()
+            cuda.syncthreads() 
 
 def train_cuda(X, y, conf, iterations=6000):
     gpu = cuda.get_current_device()
@@ -100,10 +99,9 @@ def train_cuda(X, y, conf, iterations=6000):
     syn1g = cuda.to_device(syn1)
     Xg = cuda.to_device(X)
     yg = cuda.to_device(y)
-    
     rows = X.shape[0]
     thread_ct = (gpu.WARP_SIZE, gpu.WARP_SIZE)
-    block_ct = map(lambda x: int(math.ceil(float(x) / gpu.WARP_SIZE)), [rows, ndims])
+    block_ct = map(lambda x: int(math.ceil(float(x) / thread_ct[0])), [rows, ndims])
     train_kernel[block_ct, thread_ct](Xg, yg, syn0g, syn1g, iterations)
     syn0g.to_host()
     syn1g.to_host()
@@ -125,7 +123,7 @@ def op_configs(conf, conf2, fun):
     return a
  
 if __name__ == '__main__':
-    iterations = 1
+    iterations = 2
     conf = generate_random_config()
     X = df.iloc[0:train_instances,0:ndims].as_matrix()
     y = df.iloc[0:train_instances,ndims:].as_matrix()
@@ -135,6 +133,6 @@ if __name__ == '__main__':
         start = time.time()
         output_conf = train_fun(X, y, conf_, iterations)
         end = time.time()
-        #print output_conf[0]
+        #print output_conf[0]   
         print output_conf[1]
         print "Error: ", config_error(df, output_conf), "in", (end-start)
