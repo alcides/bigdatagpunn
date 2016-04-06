@@ -53,27 +53,15 @@ def nonlind_g(x):
 	return x*(1-x)
     
     
-@cuda.jit(argtypes=[numba.float32[:,:], numba.float32[:,:], numba.float32[:,:], numba.float32[:,:], numba.int32])
+@cuda.jit(argtypes=[numba.float64[:,:], numba.float64[:,:], numba.float64[:,:], numba.float64[:,:], numba.int64])
 def train_kernel(X, y, syn0, syn1, iterations):
-    tx = cuda.threadIdx.x
-    ty = cuda.threadIdx.y
-    bx = cuda.blockIdx.x
-    by = cuda.blockIdx.y
-    bw = cuda.blockDim.x
-    bh = cuda.blockDim.y
-
-    j = tx + bx * bw
-    i = ty + by * bh
-    syn1[i,j] = 42.0
-    syn0[i,j] = 42.0
-    """
     instances = train_instances
     l1 = cuda.shared.array(shape=(instances, ndims), dtype=numba.float64)
     l2_delta = cuda.shared.array(shape=(instances, 3), dtype=numba.float64)
     l1_delta = cuda.shared.array(shape=(instances, ndims), dtype=numba.float64)
     i, j = cuda.grid(2)
-    for it in range(iterations):
-        if i < instances and j < ndims:
+    if i < instances and j < ndims:
+        for it in range(iterations):
             acc = 0
             for k in range(ndims):
                 acc += X[i, k] * syn0[k, j]
@@ -91,38 +79,34 @@ def train_kernel(X, y, syn0, syn1, iterations):
             for k in range(ndims):
                 acc += l2_delta[i,k] * syn1[j, k]
             l1_error = acc
-            l1_delta[i,j] = l1_error * nonlind_g(l1[k, j])
+            l1_delta[i, j] = l1_error * nonlind_g(l1[k, j])
             cuda.syncthreads()
             if j < 3:
                 acc = 0
-                for k in range(ndims):
+                for k in range(instances):
                     acc += l1[k, i] * l2_delta[k, j]
-                syn1[i, j] = 10 #acc
+                syn1[i, j] += acc
             acc = 0
-            for k in range(ndims):
+            for k in range(instances):
                 acc += X[k, i] * l1_delta[k, j]
             syn0[i, j] += acc
             cuda.syncthreads()
-            """
+
 def train_cuda(X, y, conf, iterations=6000):
-    stream = cuda.stream()
-    with stream.auto_synchronize():
-        gpu = cuda.get_current_device()
+    gpu = cuda.get_current_device()
+    syn0, syn1 = conf
+    syn0g = cuda.to_device(syn0)
+    syn1g = cuda.to_device(syn1)
+    Xg = cuda.to_device(X)
+    yg = cuda.to_device(y)
     
-        syn0, syn1 = conf
-        syn0g = cuda.to_device(syn0, stream)
-        syn1g = cuda.to_device(syn1, stream)
-        Xg = cuda.to_device(X, stream)
-        yg = cuda.to_device(y, stream)
-        rows = X.shape[0]
-        thread_ct = (gpu.WARP_SIZE, gpu.WARP_SIZE)
-        block_ct = map(lambda x: int(math.ceil(float(x) / gpu.WARP_SIZE)), [rows, ndims])
-        train_kernel[block_ct, thread_ct, stream](Xg, yg, syn0g, syn1g, iterations)
-        syn0g.to_host(stream)
-        syn1g.to_host(stream)
-        print syn1
-        print syn0
-        return (syn0, syn1)
+    rows = X.shape[0]
+    thread_ct = (gpu.WARP_SIZE, gpu.WARP_SIZE)
+    block_ct = map(lambda x: int(math.ceil(float(x) / gpu.WARP_SIZE)), [rows, ndims])
+    train_kernel[block_ct, thread_ct](Xg, yg, syn0g, syn1g, iterations)
+    syn0g.to_host()
+    syn1g.to_host()
+    return (syn0, syn1)
 
 def config_error(df, conf):
     syn0, syn1 = conf
@@ -140,16 +124,16 @@ def op_configs(conf, conf2, fun):
     return a
  
 if __name__ == '__main__':
-    iterations = 1
+    iterations = 10
     conf = generate_random_config()
     X = df.iloc[0:train_instances,0:ndims].as_matrix()
     y = df.iloc[0:train_instances,ndims:].as_matrix()
        
     for train_fun in [train_cuda, train]:
-        conf_ = copy.deepcopy(conf)
+        conf_ = map(lambda x: np.copy(x), conf)
         start = time.time()
         output_conf = train_fun(X, y, conf_, iterations)
         end = time.time()
         #print output_conf[0]
-        #print output_conf[1]
+        print output_conf[1]
         print "Error: ", config_error(df, output_conf), "in", (end-start)
