@@ -76,20 +76,21 @@ def train_kernel(X, y, syn0, syn1, iterations):
                 l2_delta[i, j] = l2_error * nonlind_g(l2)
             cuda.syncthreads()
             acc = 0
-            for k in range(ndims):
+            for k in range(3):
                 acc += l2_delta[i,k] * syn1[j, k]
             l1_error = acc
-            l1_delta[i, j] = l1_error * nonlind_g(l1[k, j])
+            l1_delta[i, j] = l1_error * nonlind_g(l1[i, j])
             cuda.syncthreads()
             if j < 3:
                 acc = 0
                 for k in range(instances):
                     acc += l1[k, i] * l2_delta[k, j]
                 syn1[i, j] += acc
-            acc = 0
-            for k in range(instances):
-                acc += X[k, i] * l1_delta[k, j]
-            syn0[i, j] += acc
+            if i < ndims:
+                acc = 0
+                for k in range(instances):
+                    acc += X[k, i] * l1_delta[k, j]
+                syn0[i, j] += acc
             cuda.syncthreads() 
 
 def train_cuda(X, y, conf, iterations=6000):
@@ -123,7 +124,7 @@ def op_configs(conf, conf2, fun):
     return a
  
 if __name__ == '__main__':
-    iterations = 2
+    iterations = 150000
     conf = generate_random_config()
     X = df.iloc[0:train_instances,0:ndims].as_matrix()
     y = df.iloc[0:train_instances,ndims:].as_matrix()
@@ -133,6 +134,4 @@ if __name__ == '__main__':
         start = time.time()
         output_conf = train_fun(X, y, conf_, iterations)
         end = time.time()
-        #print output_conf[0]   
-        print output_conf[1]
         print "Error: ", config_error(df, output_conf), "in", (end-start)
