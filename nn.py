@@ -36,10 +36,11 @@ def train(X, y, conf, iterations=6000):
         # how much did we miss the target value?
         l2_error = y - l2
         l2_delta = l2_error*nonlin(l2,deriv=True)
-
+        
         # how much did each l1 value contribute to the l2 error (according to the weights)?
         l1_error = l2_delta.dot(syn1.T)
         l1_delta = l1_error * nonlin(l1,deriv=True)
+        
         syn1 += l1.T.dot(l2_delta)
         syn0 += l0.T.dot(l1_delta)
     return (syn0, syn1)
@@ -124,7 +125,7 @@ def op_configs(conf, conf2, fun):
     return a
  
 if __name__ == '__main__':
-    iterations = 10
+    iterations = 1
     conf = generate_random_config()
     X = df.iloc[0:train_instances,0:ndims].as_matrix()
     y = df.iloc[0:train_instances,ndims:].as_matrix()
